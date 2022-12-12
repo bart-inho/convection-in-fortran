@@ -1,11 +1,11 @@
 
  &inputs
   Pr=1.   ! <---- CHANGE FROM 0.01 to 10.0 
-  nx=257  ! <---- CHANGE ~257 for cosine start and ~1025 for random start
+  nx=1025  ! <---- CHANGE ~257 for cosine start and ~1025 for random start
   ny=65
   total_time=0.1
   Ra=1.e6
   err=1.e-3
   a_dif=0.15   a_adv=0.4
-  Tinit='cosine'
+  Tinit='random' ! <---- CHANGE 'RANDOM' OR 'COSINE'
   /

@@ -20,4 +20,7 @@ vis:
 	python Visualization.py
 
 clean:
-	@del *.avi *.exe *.mod *.o results\*.txt results\*.csv figures_cosine\*.png figures_random\*.png
+	@del *.exe *.mod *.o 
+
+gitclean:
+	@del *.avi results\*.txt results\*.csv figures_cosine\*.png figures_random\*.png

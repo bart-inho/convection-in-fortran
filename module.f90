@@ -9,8 +9,7 @@ module all
         integer :: nx, ny, Tinfo = 540, Tfile = 349, niter = 0, piter = 0
         real(kind=real64) :: dx, dy, h, norm_res, err = 1.e-2, k = 1.0, Pr = 0.1
         real(kind=real64) :: Ra, a_dif, a_adv, total_time, dt_dif, dt_adv, dt, time = 0., size,  pi = 4.D0*DATAN(1.D0)
-        real(kind=real64), allocatable :: T(:, :), S(:, :), W(:, :), vx(:, :), vy(:, :), x(:), &
-            grad_Tx(:, :), v_gradT(:, :), d2T(:, :), v_gradW(:, :), d2W(:, :)
+        real(kind=real64), allocatable :: T(:, :), S(:, :), W(:, :), vx(:, :), vy(:, :), x(:)
         real(kind=real64), dimension(1, 1) :: Vmax
         character(len = 50):: Tinit = 'none'
         character(len = 100) :: fname = 'lowPrandt.txt'
@@ -62,9 +61,7 @@ contains
             class(everything) :: a
             integer :: i = 0, j = 0
 
-            allocate(a%T(a%nx, a%ny), a%S(a%nx, a%ny), a%W(a%nx, a%ny), a%vx(a%nx, a%ny), a%vy(a%nx, a%ny), &
-                a%grad_Tx(a%nx, a%ny), a%v_gradT(a%nx, a%ny), a%d2T(a%nx, a%ny), a%v_gradW(a%nx, a%ny), &
-                a%d2W(a%nx, a%ny), a%x(a%nx))
+            allocate(a%T(a%nx, a%ny), a%S(a%nx, a%ny), a%W(a%nx, a%ny), a%vx(a%nx, a%ny), a%vy(a%nx, a%ny), a%x(a%nx))
 
             a%T = 0; a%S = 0; a%W = 0; a%vx = 0; a%vy = 0
 
@@ -104,14 +101,15 @@ contains
             call a%setBC_T()
 
             ! Initialize vorticity
-            call a%gradTx(a%T, a%grad_Tx)
-            a%W = -a%dt * a%Pr * a%Ra * a%grad_Tx
+            ! call a%gradTx(a%T, a%grad_Tx)
+            a%W = -a%dt * a%Pr * a%Ra * gradTx(a, a%T)
             call a%SetBC_0(a%W)
 
             ! First T field update
-            call a%Laplacian(a%T, a%d2T)
-            a%T = a%T + a%dt*a%d2T
-            call a%SetBC_T()     
+            a%T = a%T + a%dt*Laplacian(a, a%T)
+            call a%SetBC_T()    
+            
+            call a%WriteTField()
 
         end subroutine initialize
 
@@ -145,61 +143,56 @@ contains
             a%dt = min(a%dt_dif, a%dt_adv)
 
             ! update vorticity
-            call a%Vgrad(a%W, a%v_gradW)
-            call a%Laplacian(a%W, a%d2W)
-            call a%gradTx(a%T, a%grad_Tx)
-            
-            a%W = a%W + a%dt * (a%Pr * a%d2W - a%v_gradW - a%Pr * a%Ra * a%grad_Tx)
+            a%W = a%W + a%dt * (a%Pr * Laplacian(a, a%W) - Vgrad(a, a%W) &
+                - a%Pr * a%Ra * gradTx(a, a%T))
             call a%SetBC_0(a%W)
-            
-            call a%Laplacian(a%T, a%d2T)
-            call a%Vgrad(a%T, a%v_gradT)
+
             ! take advection and diffusion time step
-            a%T = a%T + a%dt*(a%k * a%d2T - a%v_gradT)
+            a%T = a%T + a%dt*(a%k * Laplacian(a, a%T) - Vgrad(a, a%T))
             call a%setBC_T()
         end subroutine Timestep
     
     ! ----- Private -----
 
-        subroutine Laplacian(a, input, output)
+        function Laplacian(a, input)
 
             implicit none
             class(everything) :: a
             integer :: i, j
-            real(kind=real64) :: input(a%nx, a%ny), output(a%nx, a%ny)
+            real(kind=real64) :: input(a%nx, a%ny), Laplacian(a%nx, a%ny)
 
             do i = 1, a%nx
                 do j = 1, a%ny
                     ! Set BC to 0
                     if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
-                        output(i, j) = 0
+                        Laplacian(i, j) = 0
                     else ! Compute second derivative
-                        output(i, j) = (input(i+1, j) - 2*input(i, j) + input(i-1, j))/a%dx**2 + &
+                        Laplacian(i, j) = (input(i+1, j) - 2*input(i, j) + input(i-1, j))/a%dx**2 + &
                             (input(i, j-1) - 2*input(i, j) + input(i, j+1))/a%dy**2
                     end if
                 end do
             end do
 
-        end subroutine Laplacian
+        end function Laplacian
 
-        subroutine gradTx(a, input, output)
+        function gradTx(a, input)
 
             implicit none
             class(everything) :: a
             integer :: i, j
-            real(kind=real64) :: input(a%nx, a%ny), output(a%nx, a%ny)
+            real(kind=real64) :: input(a%nx, a%ny), gradTx(a%nx, a%ny)
 
             do j = 1, a%ny
                 do i = 1, a%nx
                     if (i == a%nx) then
-                        output(i, j) = 0
+                        gradTx(i, j) = 0
                     else
-                        output(i, j) = (input(i+1, j) - input(i-1, j))/(a%dx*2)
+                        gradTx(i, j) = (input(i+1, j) - input(i-1, j))/(a%dx*2)
                     end if
                 end do
             end do
 
-        end subroutine gradTx
+        end function gradTx
 
         subroutine ComputeVx(a, input, output)
 
@@ -241,12 +234,12 @@ contains
 
         end subroutine ComputeVy
         
-        subroutine Vgrad(a, input, output)
+        function Vgrad(a, input)
 
             implicit none
             class(everything) :: a
             integer :: i, j
-            real(kind=real64) :: input(a%nx, a%ny), output(a%nx, a%ny), &
+            real(kind=real64) :: input(a%nx, a%ny), Vgrad(a%nx, a%ny), &
                 UpVx(a%nx, a%ny), UpVy(a%nx, a%ny)
             
             ! Calculate v * grad T or W
@@ -272,9 +265,9 @@ contains
                     end if
                 end do
             end do
-            output = UpVx + UpVy
+            Vgrad = UpVx + UpVy
 
-        end subroutine Vgrad
+        end function Vgrad
     
     ! ===== Velocity solver ======
     
@@ -430,7 +423,6 @@ contains
         subroutine setBC_T(a)
         
             implicit none
-        
             class(everything) :: a
         
             a%T(:, 1) = 1.
@@ -443,7 +435,6 @@ contains
         subroutine setBC_0(a, input)
         
             implicit none
-        
             class(everything) :: a
             real(kind=real64) :: input(a%nx, a%ny)
         

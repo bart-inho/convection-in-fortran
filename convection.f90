@@ -4,7 +4,7 @@ program LowPr
     implicit none
     type(everything) :: all
     real(kind=real64) :: time
-    integer step
+    integer :: step
 
     call all%read_inputs()
     call all%initialize()

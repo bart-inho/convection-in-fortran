@@ -4,8 +4,8 @@ import pandas as pd
 import cv2
 import os
 
-def Visualization(Tinit, TField, info):
-    
+def MakeFigures(Tinit, TField, info):
+    # function that generates figures for each timestep
     folder = 'figures_'+Tinit+'/'
     i = 0
     print('Creating figures for each timestep '+Tinit+' start (.png) ...')
@@ -27,7 +27,12 @@ def Visualization(Tinit, TField, info):
         plt.close()
         i += 1
 
+        if i == 1 or i%10 == 0:
+            print(str(i), ' figures generated')
     print('Figures successfully created !!')
+
+def Visualization(Tinit, info):
+    # function that generates a movie of the convection
     print('Generating a movie for the '+Tinit+' start ...')
     image_folder = 'figures_'+Tinit
     video_name = 'convection_'+Tinit+'_Pr'+str(round(float(info.Pr), 2))+'.avi'
@@ -47,4 +52,5 @@ def Visualization(Tinit, TField, info):
 Tinit = 'random'
 Tfield = np.loadtxt('results/Tfield_'+Tinit+'.txt')
 info = pd.read_csv('results/info_'+Tinit+'.csv')
-Visualization(Tinit, Tfield, info)
+MakeFigures(Tinit, Tfield, info)
+Visualization(Tinit, info)
