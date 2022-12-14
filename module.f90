@@ -467,7 +467,5 @@ contains
             write(a%Tinfo,'(*(G0.7,:,","))') a%Tinit, a%Pr, a%total_time, a%nx, a%ny
             
         end subroutine
-        
-
-
+    
 end module all
