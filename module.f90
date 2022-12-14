@@ -493,7 +493,6 @@ contains
             end do
     
             if (a%mycpu == 0) print*, 'cpus in each direction', a%ncx, a%ncy
-    
             a%myy = mod(a%mycpu, a%ncx*a%ncy) / a%ncx
             a%myx = mod(a%mycpu, a%ncx)
     
