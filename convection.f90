@@ -1,7 +1,10 @@
 program LowPr
     use iso_fortran_env
     use all
+    
     implicit none
+    include "mpif.h"
+
     type(everything) :: all
     real(kind=real64) :: time
     integer :: step

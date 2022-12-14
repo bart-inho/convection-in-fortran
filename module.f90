@@ -14,11 +14,22 @@ module all
         character(len = 50):: Tinit = 'none'
         character(len = 100) :: fname = 'lowPrandt.txt'
 
+        ! MPI optimization variables
+        integer :: ncpus, mycpu
+        integer :: nxl, nyl
+        integer :: xmin, ymin
+        integer :: ncx = 1, ncy = 1
+        integer :: myx, myy
+        integer :: cpu_xm, cpu_xp, cpu_ym, cpu_yp
+        integer npx, npy
+        integer ierr
+
     contains
 
         procedure, public :: read_inputs, Initialize, VelocitySolve, Timestep, WriteTField, WriteInfos
         procedure, private :: setBC_T, setBC_0, ComputeVx, ComputeVy, &
             Vgrad, Laplacian, gradTx
+        procedure, private :: set_up_parallerlisation
 
         end type everything
         
@@ -161,16 +172,14 @@ contains
             integer :: i, j
             real(kind=real64) :: input(a%nx, a%ny), Laplacian(a%nx, a%ny)
 
-            do i = 1, a%nx
-                do j = 1, a%ny
-                    ! Set BC to 0
-                    if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
-                        Laplacian(i, j) = 0
-                    else ! Compute second derivative
-                        Laplacian(i, j) = (input(i+1, j) - 2*input(i, j) + input(i-1, j))/a%dx**2 + &
-                            (input(i, j-1) - 2*input(i, j) + input(i, j+1))/a%dy**2
-                    end if
-                end do
+            do concurrent (i = 1:a%nx, j = 1:a%ny)
+                ! Set BC to 0
+                if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
+                    Laplacian(i, j) = 0
+                else ! Compute second derivative
+                    Laplacian(i, j) = (input(i+1, j) - 2*input(i, j) + input(i-1, j))/a%dx**2 + &
+                        (input(i, j-1) - 2*input(i, j) + input(i, j+1))/a%dy**2
+                end if
             end do
 
         end function Laplacian
@@ -182,14 +191,12 @@ contains
             integer :: i, j
             real(kind=real64) :: input(a%nx, a%ny), gradTx(a%nx, a%ny)
 
-            do j = 1, a%ny
-                do i = 1, a%nx
-                    if (i == a%nx) then
-                        gradTx(i, j) = 0
-                    else
-                        gradTx(i, j) = (input(i+1, j) - input(i-1, j))/(a%dx*2)
-                    end if
-                end do
+            do concurrent (i = 1:a%nx, j = 1:a%ny)
+                if (i == a%nx) then
+                    gradTx(i, j) = 0
+                else
+                    gradTx(i, j) = (input(i+1, j) - input(i-1, j))/(a%dx*2)
+                end if
             end do
 
         end function gradTx
@@ -202,14 +209,12 @@ contains
             real(kind=real64) :: input(a%nx, a%ny), output(a%nx, a%ny)
             
             ! Calculate center derivative of a 2D array (in this cas vy on dy, using stream function Phi)
-            do i = 1, a%nx
-                do j = 1, a%ny
-                    if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
-                        output(i, j) = 0
-                    else
-                        output(i, j) = (input(i, j+1) - input(i, j-1))/(2*a%dy)
-                    end if
-                end do
+            do concurrent (i = 1:a%nx, j = 1:a%ny)
+                if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
+                    output(i, j) = 0
+                else
+                    output(i, j) = (input(i, j+1) - input(i, j-1))/(2*a%dy)
+                end if
             end do
 
         end subroutine ComputeVx
@@ -222,14 +227,12 @@ contains
             real(kind=real64) :: input(a%nx, a%ny), output(a%nx, a%ny)
             
             ! Calculate center derivative of a 2D array (in this cas vy on dy, using stream function Phi)
-            do i = 1, a%nx
-                do j = 1, a%ny
-                    if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
-                        output(i, j) = 0
-                    else
-                        output(i, j) = (input(i-1, j) - input(i+1, j))/(2*a%dx)
-                    end if
-                end do
+            do concurrent (i = 1:a%nx, j = 1:a%ny)
+                if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
+                    output(i, j) = 0
+                else
+                    output(i, j) = (input(i-1, j) - input(i+1, j))/(2*a%dx)
+                end if
             end do
 
         end subroutine ComputeVy
@@ -243,27 +246,25 @@ contains
                 UpVx(a%nx, a%ny), UpVy(a%nx, a%ny)
             
             ! Calculate v * grad T or W
-            do i = 1, a%nx
-                do j = 1, a%ny
-                    if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
-                        UpVx(i, j) = 0
-                        UpVy(i, j) = 0
+            do concurrent (i = 1:a%nx, j = 1:a%ny)
+                if (i == 1 .or. i == a%nx .or. j == 1 .or. j == a%ny) then
+                    UpVx(i, j) = 0
+                    UpVy(i, j) = 0
+                else
+                    ! Calculate upwind derivative for Vx
+                    if (a%vx(i, j) > 0) then
+                        UpVx(i, j) = a%vx(i, j) * (input(i, j) - input(i-1, j))/a%dx
                     else
-                        ! Calculate upwind derivative for Vx
-                        if (a%vx(i, j) > 0) then
-                            UpVx(i, j) = a%vx(i, j) * (input(i, j) - input(i-1, j))/a%dx
-                        else
-                            UpVx(i, j) = a%vx(i, j) * (input(i+1, j) - input(i, j))/a%dx
-                        end if
-
-                        ! Calculate upwind derivative for Vy
-                        if (a%vy(i, j) > 0) then
-                            UpVy(i, j) = a%vy(i, j) * (input(i, j) - input(i, j-1))/a%dy
-                        else
-                            UpVy(i, j) = a%vy(i, j) * (input(i, j+1) - input(i, j))/a%dy
-                        end if
+                        UpVx(i, j) = a%vx(i, j) * (input(i+1, j) - input(i, j))/a%dx
                     end if
-                end do
+
+                    ! Calculate upwind derivative for Vy
+                    if (a%vy(i, j) > 0) then
+                        UpVy(i, j) = a%vy(i, j) * (input(i, j) - input(i, j-1))/a%dy
+                    else
+                        UpVy(i, j) = a%vy(i, j) * (input(i, j+1) - input(i, j))/a%dy
+                    end if
+                end if
             end do
             Vgrad = UpVx + UpVy
 
@@ -468,6 +469,89 @@ contains
             
         end subroutine
         
+    ! ===== MPI optimization =====
+        subroutine set_up_parallerlisation(a)
 
+            class(everything) :: a
+
+            integer n, nmax
+            call MPI_init(a%ierr)
+            call MPI_comm_size(MPI_comm_world, a%ncpus, a%ierr)
+            call MPI_comm_rank(MPI_comm_world, a%mycpu, a%ierr)
+    
+            n = 1; a%nxl = a%nx; a%nyl = a%ny;
+    
+            do while (n < a%ncpus) ! devides the subdomains to be equal to the number of cores
+                nmax = max(a%nxl, a%nyl)
+                if (a%nxl == nmax) then
+                    a%ncx = a%ncx*2; a%nxl = a%nxl / 2
+                else if (a%nyl == nmax) then
+                    a%ncy = a%ncy*2; a%nyl = a%nyl / 2
+                end if
+    
+                n = n*2
+            end do
+    
+            if (a%mycpu == 0) print*, 'cpus in each direction', a%ncx, a%ncy
+    
+            a%myy = mod(a%mycpu, a%ncx*a%ncy) / a%ncx
+            a%myx = mod(a%mycpu, a%ncx)
+    
+            a%cpu_xm = a%mycpu-1       ; a%cpu_xp = a%mycpu+1 ! cpu number of the local subdomaine
+            a%cpu_ym = a%mycpu-a%ncx     ; a%cpu_yp = a%mycpu + a%ncx
+    
+            a%xmin = 1; if (a%myx>0) a%xmin = 0 ! lowest coordinate to solve for
+            a%ymin = 1; if (a%myy>0) a%ymin = 0 ! -> some subdomaines will include boundary pointes
+    
+            ! number of points to communicate in each directions
+            a%npx = (a%nyl+2)*(a%nxl+2)
+            a%npy = (a%nxl+2)*(a%nyl+2)
+
+        end subroutine set_up_parallerlisation
+    
+        subroutine update_sides(a)
+            class(everything) :: a
+
+            integer m(2), ierr
+            call sides1d(npx, &
+                myx>0, u(0, :, :), u(-1, :, :), cpu_xm, &
+                myx<ncx-1, u(nxl-1, :, :), u(nxl, :, :), cpu_xp)
+            call sides1d(npy, &
+                myy>0, u(:, 0, :), u(:, -1, :), cpu_ym, &
+                myy<ncy-1, u(:, nyl-1, :), u(:, nyl, :), cpu_yp)
+            call sides1d(npz, &
+                myz>0, u(:, :, 0), u(:, :, -1), cpu_zm, &
+                myz<ncz-1, u(:, :, nzl-1), u(:, :, nzl), cpu_zp)
+            
+        end subroutine update_sides
+    
+        subroutine sides1d(length, & ! communicates all the values in all directions
+            do_mside, sendbuf_m, recvbuf_m, cpu_m, &
+            do_pside, sendbuf_p, recvbuf_p, cpu_p)
+
+            logical, intent(in) :: do_mside, do_pside
+            integer, intent(in) :: cpu_m, cpu_p, length
+            real, intent(in) :: sendbuf_m(length), sendbuf_p(length)
+            real, intent(out) :: recvbuf_m(length), recvbuf_p(length)
+            integer m(2), statuses(MPI_status_size, 2), ierr
+    
+            if (do_mside) then ! negative directions
+                call MPI_isend(sendbuf_m, length, MPI_real, cpu_m,1, MPI_comm_world, m(1), ierr)
+                call MPI_irecv(recvbuf_m, length, MPI_real, cpu_m,1, MPI_comm_world, m(2), ierr)
+            end if
+    
+            if (do_pside) then ! positive directions
+                call MPI_send(sendbuf_p, length, MPI_real, cpu_p,1, MPI_comm_world, ierr)
+                call MPI_recv(recvbuf_p, length, MPI_real, cpu_p,1, MPI_comm_world, MPI_status_ignore, ierr)
+            end if  
+            if (do_mside) call MPI_waitall(2, m, statuses, ierr)
+    
+        end subroutine sides1d
+    
+        subroutine simple_globalmax(buf)
+            real buf, work
+            call MPI_Allreduce(buf, work, 1, MPI_real, MPI_max, MPI_comm_world, ierr)
+            buf = work
+        end subroutine simple_globalmax
 
 end module all
