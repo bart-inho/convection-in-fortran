@@ -29,7 +29,7 @@ module all
         procedure, public :: read_inputs, Initialize, VelocitySolve, Timestep, WriteTField, WriteInfos
         procedure, private :: setBC_T, setBC_0, ComputeVx, ComputeVy, &
             Vgrad, Laplacian, gradTx
-        procedure, private :: set_up_parallerlisation
+        procedure, private :: set_up_parallerlisation, update_sides,simple_globalmax
 
         end type everything
         
@@ -131,11 +131,16 @@ contains
 
             implicit none
             class(everything) :: a
+            integer iter
             
             ! poisson solver to get S from W
             a%norm_res = Vcycle_2DPoisson(a%S, a%W, a%h)
             do while (a%err <= a%norm_res)
                 a%norm_res = Vcycle_2DPoisson(a%S, a%W, a%h)
+
+                call a%update_sides()
+                call a%simple_globalmax(a%norm_res)
+
             end do
             call a%SetBC_0(a%S)
             call a%ComputeVx(a%S, a%vx)
@@ -508,48 +513,45 @@ contains
 
         end subroutine set_up_parallerlisation
     
-        subroutine update_sides(a)
+        subroutine update_sides(a, u)
             class(everything) :: a
-
             integer m(2), ierr
             call sides1d(npx, &
-                myx>0, u(0, :, :), u(-1, :, :), cpu_xm, &
-                myx<ncx-1, u(nxl-1, :, :), u(nxl, :, :), cpu_xp)
+                myx>0, u(0, :), u(-1, :), cpu_xm, &
+                myx<ncx-1, u(nxl-1, :, :), u(nxl, :), cpu_xp)
             call sides1d(npy, &
-                myy>0, u(:, 0, :), u(:, -1, :), cpu_ym, &
-                myy<ncy-1, u(:, nyl-1, :), u(:, nyl, :), cpu_yp)
-            call sides1d(npz, &
-                myz>0, u(:, :, 0), u(:, :, -1), cpu_zm, &
-                myz<ncz-1, u(:, :, nzl-1), u(:, :, nzl), cpu_zp)
+                myy>0, u(:, 0), u(:, -1), cpu_ym, &
+                myy<ncy-1, u(:, nyl-1), u(:, nyl), cpu_yp)
             
         end subroutine update_sides
     
-        subroutine sides1d(length, & ! communicates all the values in all directions
+        subroutine sides1d(a, length, & ! communicates all the values in all directions
             do_mside, sendbuf_m, recvbuf_m, cpu_m, &
             do_pside, sendbuf_p, recvbuf_p, cpu_p)
-
+            class(everything) :: a
             logical, intent(in) :: do_mside, do_pside
             integer, intent(in) :: cpu_m, cpu_p, length
             real, intent(in) :: sendbuf_m(length), sendbuf_p(length)
             real, intent(out) :: recvbuf_m(length), recvbuf_p(length)
-            integer m(2), statuses(MPI_status_size, 2), ierr
+            integer m(2), statuses(MPI_status_size, 2)
     
             if (do_mside) then ! negative directions
-                call MPI_isend(sendbuf_m, length, MPI_real, cpu_m,1, MPI_comm_world, m(1), ierr)
-                call MPI_irecv(recvbuf_m, length, MPI_real, cpu_m,1, MPI_comm_world, m(2), ierr)
+                call MPI_isend(sendbuf_m, length, MPI_real, cpu_m,1, MPI_comm_world, m(1), a%ierr)
+                call MPI_irecv(recvbuf_m, length, MPI_real, cpu_m,1, MPI_comm_world, m(2), a%ierr)
             end if
     
             if (do_pside) then ! positive directions
                 call MPI_send(sendbuf_p, length, MPI_real, cpu_p,1, MPI_comm_world, ierr)
-                call MPI_recv(recvbuf_p, length, MPI_real, cpu_p,1, MPI_comm_world, MPI_status_ignore, ierr)
+                call MPI_recv(recvbuf_p, length, MPI_real, cpu_p,1, MPI_comm_world, MPI_status_ignore, a%ierr)
             end if  
             if (do_mside) call MPI_waitall(2, m, statuses, ierr)
     
         end subroutine sides1d
     
-        subroutine simple_globalmax(buf)
-            real buf, work
-            call MPI_Allreduce(buf, work, 1, MPI_real, MPI_max, MPI_comm_world, ierr)
+        subroutine simple_globalmax(a, buf)
+            class(everything) :: a
+            real(kind=real64) buf, work
+            call MPI_Allreduce(buf, work, 1, MPI_real, MPI_max, MPI_comm_world, a%ierr)
             buf = work
         end subroutine simple_globalmax
 
